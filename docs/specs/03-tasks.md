@@ -176,17 +176,17 @@ Do Low only if time is left, and only if you ask.
 
 | Status | # | Task | Priority | Checks (from requirements §4) |
 |--------|---|------|----------|-------------------------------|
-| To do | 9 | Create the LeaveRequest table | High | — (Leave-design §1; prepares AC-14) |
-| To do | 10 | Shared rules: `src/lib/leave.ts` | High | — (traces Leave-design §2–§3; used by AC-14…AC-19) |
-| To do | 11 | Submit a request — `/leave/new` | High | AC-14 (submit + banner part), AC-15, AC-16, AC-17, AC-18, AC-19 |
-| To do | 12 | My lists and the detail page | High | AC-14 (list part), AC-24 (own + outsider part) |
-| To do | 13 | The chosen supervisor signs or rejects | High | AC-20, AC-21, AC-27 (their part) |
-| To do | 14 | The requester sends a Signed request to HR | High | AC-22, AC-27 (its part) |
-| To do | 15 | The HR queue: approve or reject | High | AC-23, AC-24 (queue part), AC-27 (its part) |
-| To do | 16 | Access-control sweep on pages and actions | High | AC-16, AC-20, AC-22, AC-23, AC-24, AC-25 (action part) |
-| To do | 17 | Edit and delete while Pending supervisor | Medium | AC-26, AC-27 (their part) |
-| To do | 18 | Admin: read-only table with Status filter | Medium | AC-24 (admin part), AC-25 (list part) |
-| To do | 19 | Whole-module check against the specs | High | All of AC-14…AC-27 |
+| Done | 9 | Create the LeaveRequest table | High | — (Leave-design §1; prepares AC-14) |
+| Done | 10 | Shared rules: `src/lib/leave.ts` | High | — (traces Leave-design §2–§3; used by AC-14…AC-19) |
+| Done | 11 | Submit a request — `/leave/new` | High | AC-14 (submit + banner part), AC-15, AC-16, AC-17, AC-18, AC-19 |
+| Done | 12 | My lists and the detail page | High | AC-14 (list part), AC-24 (own + outsider part) |
+| Done | 13 | The chosen supervisor signs or rejects | High | AC-20, AC-21, AC-27 (their part) |
+| Done | 14 | The requester sends a Signed request to HR | High | AC-22, AC-27 (its part) |
+| Done | 15 | The HR queue: approve or reject | High | AC-23, AC-24 (queue part), AC-27 (its part) |
+| Done | 16 | Access-control sweep on pages and actions | High | AC-16, AC-20, AC-22, AC-23, AC-24, AC-25 (action part) |
+| Done | 17 | Edit and delete while Pending supervisor | Medium | AC-26, AC-27 (their part) |
+| Done | 18 | Admin: read-only table with Status filter | Medium | AC-24 (admin part), AC-25 (list part) |
+| Done | 19 | Whole-module check against the specs | High | All of AC-14…AC-27 |
 
 ---
 
