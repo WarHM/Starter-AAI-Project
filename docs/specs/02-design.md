@@ -241,3 +241,217 @@ language as the reference mockup:
 | `hr-1@budiman.com` | HR 1 | 00-175555 | HR | Human Resources | HR Officer |
 | `hr-2@budiman.com` | HR 2 | 00-184444 | HR | Human Resources | HR Officer |
 | `admin@budiman.com` | Admin | 00-193333 | Admin | Admin | Admin Manager |
+
+---
+
+# Leave Request – Design
+
+> **This file answers:** How is the leave module put together? (data, rules,
+> screens, where the code lives)
+> **Who:** Drafted by the AI from the HRMS document §5–§7 and the interview
+> of 20/11/2026. You review all of it.
+>
+> Follows the login design above; nothing here changes it. The login §1 note
+> that promised "a proper Division table comes later with FR-02" is
+> **revised by the interview**: divisions stay text on `User`, validated
+> against Reference A; the supervisor dropdown queries the `User` table.
+
+## 1. Tables
+
+### `LeaveRequest` – one row per request (new)
+
+| Field | Type | Required? | What it holds |
+|-------|------|-----------|---------------|
+| `id` | number | auto | Unique number for the row |
+| `employeeId` | number → `User.id` | yes | The requester — any non-Admin user (⚑ interview: Supervisors and HR file too) |
+| `supervisorId` | number → `User.id` | yes | The chosen signer. Server check: same division as the requester, role `Supervisor` or `HR`, never the requester (⚑ interview) |
+| `leaveType` | text | yes | One of Reference C (five types) |
+| `reason` | text | when required | "What the leave is for" — the document's *Other leave type* field. Required non-empty when `leaveType` is **Other** or **Compassionate** (⚑ interview); max 500 characters |
+| `startDate` | text `YYYY-MM-DD` | yes | First leave day. Calendar dates (no times); weekends count |
+| `endDate` | text `YYYY-MM-DD` | yes | Last leave day. Not before `startDate` |
+| `status` | text | yes | One of the six Reference C statuses, stored verbatim |
+| `supervisorRemark` | text | when required | The supervisor's reason — required exactly when the supervisor rejects |
+| `hrOfficerId` | number → `User.id` | when decided | The HR user who approved/rejected; set by the server from the session, never from the form |
+| `hrRemark` | text | when required | The HR reason — required exactly when HR rejects |
+| `submittedAt` | date-time | auto | Set when the form is accepted |
+| `signedAt` | date-time | auto | Set when the supervisor signs |
+| `decidedAt` | date-time | auto | Set when the request reaches a final status (Approved or either Rejected) |
+
+Day count is **derived, not stored**: whole days inclusive
+(`endDate − startDate + 1`), computed by `src/lib/leave.ts`.
+
+Dates are stored as validated `YYYY-MM-DD` text (not `DateTime`) so a
+calendar day means the same thing at every hour and time zone — this is a
+date-only form, and text avoids the SQLite/UTC drift that `DateTime` brings.
+
+The `User` model gains the three named back-relations Prisma requires for
+`employeeId` / `supervisorId` / `hrOfficerId`. **No new User columns** —
+division and designation stay text, checked against Reference A (revising
+the login §1 note, per the interview).
+
+## 2. The state machine
+
+Statuses and allowed moves — anything not in this table is refused:
+
+| # | From → To | Who may do it | Preconditions | Effects |
+|---|-----------|---------------|---------------|---------|
+| 1 | (new) → **Pending supervisor** | requester (role Employee, Supervisor or HR) via `/leave/new` | full validation (rule L3); no overlap (rule L4); confirm | `submittedAt`; success banner |
+| 2 | **Pending supervisor** → same | requester via `/leave/[id]/edit` | every submit rule re-checked, overlap query excluding this row; confirm | fields updated |
+| 3 | **Pending supervisor** → (deleted) | requester, confirm dialog | status still Pending supervisor | row deleted |
+| 4 | **Pending supervisor** → **Signed** | the user in `supervisorId` only | requester ≠ signer (L5); confirm | `signedAt` |
+| 5 | **Pending supervisor** → **Rejected by supervisor** | the user in `supervisorId` only | non-empty remark; confirm | `supervisorRemark`, `decidedAt` |
+| 6 | **Signed** → **Pending HR** | the requester only | confirm | row joins the HR queue |
+| 7 | **Pending HR** → **Approved** | any `HR`-role user ≠ requester (L5); either officer | confirm | `hrOfficerId` (from session), `decidedAt` |
+| 8 | **Pending HR** → **Rejected by HR** | any `HR`-role user ≠ requester | non-empty remark; confirm | `hrRemark`, `hrOfficerId`, `decidedAt` |
+
+Rejection by supervisor and rejection by HR are separate finals — a
+supervisor-rejected request never re-enters the flow; the requester files
+again as a new request (the document has no resubmit/reopen).
+
+## 3. Business rules
+
+1. **L1 — Six statuses, verbatim.** Display strings are exactly Reference C,
+   held as constants in `src/lib/leave.ts` — never typed by hand at call
+   sites.
+2. **L2 — Roles, from the database.** Who may act comes from the live `User`
+   row (login rule 8 still applies), not from the form or cookie alone.
+   Admin performs no leave action anywhere, ever.
+3. **L3 — Server re-validates every field on submit *and* edit**: `leaveType`
+   in Reference C; `reason` non-empty (≤ 500 chars) when Other/Compassionate;
+   dates match `YYYY-MM-DD`, are real calendar dates, and end ≥ start;
+   the chosen supervisor is a same-division user with role Supervisor or HR
+   and is not the requester. Client-side checks are politeness only (login
+   design §3 Validation, OWASP A03).
+4. **L4 — No double-booking.** A submit or edit is refused if the requester
+   already has a request whose status is Pending supervisor, Signed,
+   Pending HR or **Approved** and whose dates overlap
+   (`NOT (endDate < newStart OR startDate > newEnd)`). An edit excludes
+   its own row. Rejected rows never block (AC-19).
+5. **L5 — No self-decisions.** The person who filed a request can never be its
+   signer or its HR decider — checked server-side in every action even
+   though the dropdown already hides the option (OWASP A01). The document
+   only demands that the HR decider be recorded, so the signer of a request
+   *may* be the HR officer who later decides it (allowed, recorded).
+6. **L6 — Either HR officer decides the queue**, and `hrOfficerId` is taken from
+   the verified session — the form never names the decider (AC-23).
+7. **L7 — Remarks are rejections' shadow.** `supervisorRemark` / `hrRemark` are
+   required exactly when their stage rejects, and are simply never set on
+   an approval.
+8. **L8 — One viewer per record.** Pages and actions both consult the shared
+   predicates in `src/lib/leave.ts` (L8) before showing or changing
+   anything — the same code answers "can this user see / act on this row"
+   for every surface.
+9. **L9 — Delete is the requester's undo only** — hard delete, only while
+   Pending supervisor, with the standard confirm. After that, history is
+   immutable: no one edits or deletes any record (admin included).
+10. **L10 — Confirm first, banner after** (FR-07): every action button carries
+    the native confirm; on success the page reloads with `?ok=<key>` and
+    the shared banner component prints the matching green message.
+    Cancel means the action never reaches the server.
+11. **L11 — Admin is a window, not a hand.** Admin pages render data only; no
+    action component is ever rendered for Admin, and every action re-checks
+    the role server-side (AC-25).
+
+## 4. Who can see and do what (matrix)
+
+| Surface | Employee | Supervisor | HR | Admin |
+|---------|----------|------------|----|-------|
+| Own requests (own rows) | see, edit/delete while Pending, send when Signed | same | same | — |
+| Requests naming me as supervisor | — | see; sign / reject while Pending | see; sign / reject while Pending (HR colleagues pick each other) | — |
+| Pending-HR queue | — | — | see all; approve/reject (not my own) | — |
+| HR-decided records (Approved / Rejected by HR) | — | — | see all | — |
+| Every record | — | — | — | see (newest first, status filter) |
+| Someone else's request | bounce | bounce | bounce unless queue/decided | open read-only |
+
+## 5. Screens (routes)
+
+| Route | Who | What it shows | Status |
+|-------|-----|---------------|--------|
+| `/employee` | Employee only | "My leave requests" table (type, dates, N days, status, chosen supervisor, latest remark, submitted) + **New leave request** button — replaces the "Nothing here yet" placeholder of login §4 | To do |
+| `/supervisor` | Supervisor only | Two sections: **Awaiting my signature** (rows naming me, Pending) and **My leave requests** (my own rows) + New button | To do |
+| `/hr` | HR only | Four sections: **Awaiting my signature** (rows naming me — HR colleagues pick each other), **HR queue** (all Pending HR, not my own filings), **Decided by HR**, **My leave requests**; + New button | To do |
+| `/admin` | Admin only | Every record, newest first (requester, division, type, dates, days, status, latest remark, HR decider), one Status filter (`?status=`); rows link to the read-only detail | To do |
+| `/leave/new` | Emp / Supervisor / HR (Admin bounced to `/admin`) | Form: leave type select; reason textarea (label marks it required for Other/Compassionate); start & end date inputs; supervisor select filled server-side with eligible signers; Submit (confirm) | To do |
+| `/leave/[id]` | per matrix §4, checked per record | Full record: requester, chosen supervisor, type, reason, dates + day count, status badge, both remarks, submitted/signed/decided dates, HR decider. Action buttons render only for the allowed viewer + status: Sign / Reject+remark, Send to HR, Approve / Reject+remark, Edit / Delete | To do |
+| `/leave/[id]/edit` | requester only, status Pending supervisor | Pre-filled form + **Delete request** (confirm). Every other viewer and every later status → bounced/refused | To do |
+
+Rows link to `/leave/[id]`; every action is a server action posted from
+those pages (no separate API, per the technology choice).
+
+**Guards:** `src/proxy.ts` keeps guarding the four role homes as before;
+the `/leave/*` routes require a valid session of any role, and role/record
+checks run inside the pages and actions via `getRequiredUser()` (login
+design §5) and the predicates in `src/lib/leave.ts` — the proxy stays the
+fast first gate, never the authority (login rule 9).
+
+Visual language: exactly the login design's blue-card style — tables and
+forms use pill inputs, the title band carries the screen name, status
+badges and the green `green-200` success strip follow the same palette.
+
+## 6. Technology (only what the login module doesn't already cover)
+
+| Part | Choice | In plain words |
+|------|--------|----------------|
+| Data | Prisma `LeaveRequest` model on the same SQLite file | One more table, same `db:push` flow |
+| Shared rules | `src/lib/leave.ts` | The single source for statuses, types, validation, overlap, day count and the can-view/can-act predicates |
+| Actions | Server actions in `src/app/leave/actions.ts` | Eight actions: create, update, delete, sign, supervisor-reject, send-to-HR, approve, hr-reject |
+| Lists | Server components reading Prisma | No client-side fetching; tables render on the server |
+
+## 7. Where the code lives (new files)
+
+| Folder / file | What's in it |
+|---------------|--------------|
+| `prisma/schema.prisma` | + `LeaveRequest` model with the three named `User` relations (no new User columns) |
+| `src/lib/leave.ts` | Reference C constants, `validateRequest()`, `overlapExists()`, `dayCount()`, `canView()`, `canAct()` — used by every page and action |
+| `src/app/leave/actions.ts` | The eight server actions; each: verify session → load row → `canAct` → validate → mutate → `revalidatePath` → redirect with `?ok=` |
+| `src/app/leave/new/page.tsx` | The submit form |
+| `src/app/leave/[id]/page.tsx` | Detail page + status-appropriate action buttons |
+| `src/app/leave/[id]/edit/page.tsx` | Edit form + Delete |
+| `src/components/LeaveForm.tsx` | The form shared by new and edit |
+| `src/components/LeaveTable.tsx` | The shared requests table (columns switch by role context; status and the latest remark always show — FR-06 "with the status and remarks") |
+| `src/components/LeaveBanner.tsx` | The `?ok=` success strip |
+| `src/app/employee|supervisor|hr|admin/page.tsx` | Placeholder bodies replaced by the role's tables/buttons (files exist; content grows) |
+
+## 8. Security (in plain words)
+
+- **Per-record authorization everywhere.** Every page and every one of the
+  eight actions loads the row and asks `canView`/`canAct` before
+  rendering or mutating — ids from the URL or form are never trusted
+  (OWASP A01, AC-16/20/22/23/25).
+- **Server re-validation.** Type, reason, dates, signer eligibility and
+  overlap are enforced in the actions regardless of what the form sent
+  (OWASP A03, AC-16…AC-19).
+- **No self-decisions, no admin hands.** Signer ≠ requester and HR decider
+  ≠ requester server-side; every action refuses the Admin role and any
+  role the state machine doesn't name (OWASP A01/A07, AC-20/23/25).
+- **State-machine enforced transitions.** An action checks the row's
+  current status before mutating, so a replayed or hand-crafted request
+  on a stale status is refused (AC-20/22).
+- **The decider comes from the session**, never from form data (AC-23).
+- **Prisma only, no raw SQL; remarks are length-capped; React escapes all
+  rendered text** — remarks and reasons are plain text with no HTML
+  interpretation (OWASP A03/A05).
+- **Session rules carry over unchanged** — actions re-verify the signed
+  cookie (login rules 6–7, 9).
+
+## 9. Commands
+
+Unchanged from the login design §7: `npm run db:push` picks up the new
+table, `npm run db:seed` is untouched (no new seed data needed), then
+`npm run dev`.
+
+---
+
+# Reference C. Leave fixed lists
+
+- **Leave types:** Annual leave, Maternity leave, Unpaid leave,
+  Compassionate leave, Other
+  - `reason` required for **Other** and **Compassionate** (⚑ interview);
+    optional elsewhere
+- **Statuses (stored and displayed verbatim):** `Pending supervisor`,
+  `Signed`, `Pending HR`, `Approved`, `Rejected by supervisor`,
+  `Rejected by HR` — the last three are final
+- **Eligible signers:** same-division users with role `Supervisor` or `HR`,
+  never the requester (⚑ interview)
+- **Date format:** `YYYY-MM-DD` text; day count inclusive of both dates;
+  weekends count; no holiday calendar; no maximum length (⚑ interview)
