@@ -56,5 +56,14 @@ export function proxy(request: NextRequest) {
 
 export const config = {
   // Guard everything except the login page itself and Next internals.
-  matcher: ['/', '/employee/:path*', '/supervisor/:path*', '/hr/:path*', '/admin/:path*'],
+  // /leave/* needs only a session here — role and record checks run
+  // page-side and in the actions (Leave-design §5, login rule 9).
+  matcher: [
+    '/',
+    '/employee/:path*',
+    '/supervisor/:path*',
+    '/hr/:path*',
+    '/admin/:path*',
+    '/leave/:path*',
+  ],
 }
