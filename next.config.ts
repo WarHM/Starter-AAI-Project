@@ -6,6 +6,7 @@ const projectRoot = path.dirname(fileURLToPath(import.meta.url));
 
 const nextConfig: NextConfig = {
   /* config options here */
+  // (no options yet; touching this file restarts the dev server)
   cacheComponents: false,
   turbopack: {
     root: projectRoot,
