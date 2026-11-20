@@ -21,5 +21,35 @@ model User {
   designation  String // one of the designations of that division (Reference A)
   createdAt    DateTime @default(now()) @map("created_at")
 
+  // Leave module back-relations (Leave-design §1) — no new User columns.
+  submitted   LeaveRequest[] @relation("LeaveEmployee")
+  signedFor   LeaveRequest[] @relation("LeaveSupervisor")
+  hrDecisions LeaveRequest[] @relation("LeaveHrOfficer")
+
   @@map("users")
+}
+
+// One row per leave request (Leave-design §1). Dates are YYYY-MM-DD text:
+// a calendar day means the same thing at every hour (no DateTime/UTC drift).
+model LeaveRequest {
+  id               Int       @id @default(autoincrement())
+  employeeId       Int       @map("employee_id") // the requester (any non-Admin)
+  supervisorId     Int       @map("supervisor_id") // chosen signer: same division, Supervisor|HR, != requester
+  leaveType        String    @map("leave_type") // one of Reference C types
+  reason           String? // "what the leave is for"; required for Other/Compassionate (L3)
+  startDate        String    @map("start_date") // YYYY-MM-DD
+  endDate          String    @map("end_date") // YYYY-MM-DD, >= start
+  status           String // one of the six Reference C statuses, verbatim (L1)
+  supervisorRemark String?   @map("supervisor_remark") // required exactly when supervisor rejects (L7)
+  hrOfficerId      Int?      @map("hr_officer_id") // HR decider, from the session (L6)
+  hrRemark         String?   @map("hr_remark") // required exactly when HR rejects (L7)
+  submittedAt      DateTime  @default(now()) @map("submitted_at")
+  signedAt         DateTime? @map("signed_at")
+  decidedAt        DateTime? @map("decided_at") // set when a final status is reached
+
+  employee   User  @relation("LeaveEmployee", fields: [employeeId], references: [id])
+  supervisor User  @relation("LeaveSupervisor", fields: [supervisorId], references: [id])
+  hrOfficer  User? @relation("LeaveHrOfficer", fields: [hrOfficerId], references: [id])
+
+  @@map("leave_requests")
 }
