@@ -1,0 +1,25 @@
+// Prisma schema – Budiman HRMS, Login module.
+// One row per person who can log in (design §1, User table).
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+model User {
+  id           Int      @id @default(autoincrement())
+  name         String
+  icNumber     String   @map("ic_number") // format xx-xxxxxx, checked in lib/validation
+  email        String   @unique // work email, @budiman.com, used to log in
+  passwordHash String   @map("password_hash") // bcryptjs hash, never plain text
+  role         String // Employee | Supervisor | HR | Admin (Reference A)
+  division     String // one of the five divisions (Reference A)
+  designation  String // one of the designations of that division (Reference A)
+  createdAt    DateTime @default(now()) @map("created_at")
+
+  @@map("users")
+}
